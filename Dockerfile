@@ -9,7 +9,16 @@ RUN apt-get update && apt-get install -y \
     curl \
     wget \
     net-tools \
+    openssh-server \
+    mosh \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure SSH server for public key auth
+RUN mkdir -p /var/run/sshd /root/.ssh && \
+    chmod 700 /root/.ssh && \
+    echo 'AuthorizedKeysFile .ssh/authorized_keys' >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication no' >> /etc/ssh/sshd_config && \
+    echo 'PermitRootLogin prohibit-password' >> /etc/ssh/sshd_config
 
 # Set Python aliases
 RUN ln -sf /usr/bin/python3 /usr/bin/python && \
@@ -34,13 +43,19 @@ RUN mkdir -p /app/envs
 RUN chmod +x /app/polarisLLM.py
 RUN ln -sf /app/polarisLLM.py /usr/local/bin/polarisLLM
 
+# Create startup script with SSH
+COPY ./start_server.sh /app/start_server.sh
+RUN chmod +x /app/start_server.sh
+
 # Expose the API port
 EXPOSE 8020
 # Expose model server ports
 EXPOSE 8001-8099
+# Expose SSH and Mosh ports
+EXPOSE 22 60000-61000/udp
 
-# Start the API server
-CMD ["python", "api.py"]
+# Start the API server with SSH
+CMD ["/app/start_server.sh"]
 
 # Label the image
 LABEL maintainer="PolarisLLM Team" \

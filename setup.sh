@@ -4,6 +4,23 @@ set -e  # Exit on any error
 echo "🚀 Setting up PolarisLLM Deployment Server..."
 echo "=============================================="
 
+# Process command line arguments
+ENABLE_SSH=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --with-ssh)
+      ENABLE_SSH=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Available options:"
+      echo "  --with-ssh     Enable SSH/Mosh support (disabled by default)"
+      exit 1
+      ;;
+  esac
+done
+
 # Check for Docker
 if ! command -v docker &> /dev/null; then
     echo "❌ Docker is not installed. Please install Docker first: https://docs.docker.com/get-docker/"
@@ -28,79 +45,32 @@ else
     echo "✅ NVIDIA Docker support detected"
 fi
 
-# Check for port conflicts
-check_port() {
-    local port=$1
-    local service_name=$2
-    
-    # Check if port is in use
-    if command -v netstat &> /dev/null; then
-        # Use netstat if available
-        if netstat -tuln | grep -q ":$port "; then
-            echo "⚠️ Warning: Port $port is already in use by another service"
-            netstat -tuln | grep ":$port " | head -1
-            return 1
-        fi
-    elif command -v ss &> /dev/null; then
-        # Fall back to ss if netstat is not available
-        if ss -tuln | grep -q ":$port "; then
-            echo "⚠️ Warning: Port $port is already in use by another service"
-            ss -tuln | grep ":$port " | head -1
-            return 1
-        fi
-    else
-        # Simple check using lsof if available
-        if command -v lsof &> /dev/null; then
-            if lsof -i:$port -P -n | grep -q "LISTEN"; then
-                echo "⚠️ Warning: Port $port is already in use by another service"
-                lsof -i:$port -P -n | grep "LISTEN" | head -1
-                return 1
-            fi
-        fi
-    fi
-    
-    echo "✅ Port $port is available for $service_name"
-    return 0
-}
-
-# Check API port
-api_port_conflict=false
-if ! check_port 8020 "PolarisLLM API"; then
-    api_port_conflict=true
-fi
-
 # Create required directories
 echo "📁 Creating required directories..."
 mkdir -p cache logs
 echo "✅ Directories created"
+
+# Update the SSH settings in docker-compose.yml
+if [ "$ENABLE_SSH" = "true" ]; then
+    echo "🔐 Enabling SSH/Mosh support..."
+    # Use sed to enable SSH in docker-compose.yml
+    sed -i 's/SSH_ENABLED=false/SSH_ENABLED=true/' docker-compose.yml
+    echo "✅ SSH/Mosh support enabled"
+fi
 
 # Stop any existing container
 echo "🛑 Stopping any existing PolarisLLM containers..."
 docker-compose down 2>/dev/null || true
 echo "✅ Environment clean"
 
-# Build and start the container
+# Build and start the container with increased timeout
 echo "🏗️ Building and starting PolarisLLM container..."
-if [ "$api_port_conflict" = true ]; then
-    echo "⚠️ API port conflict detected. Modifying docker-compose.yml to use a different port..."
-    # Find an available port for the API
-    for port in $(seq 8021 8099); do
-        if check_port $port "PolarisLLM API" > /dev/null; then
-            # Temporarily modify the docker-compose.yml file
-            sed -i.bak "s/\"8020:8020\"/\"$port:8020\"/" docker-compose.yml
-            echo "🔄 Using port $port for API instead"
-            api_port=$port
-            break
-        fi
-    done
-fi
-
-# Start the container
+export COMPOSE_HTTP_TIMEOUT=180  # Increase timeout to 3 minutes
 docker-compose up -d --build
 
 # Wait for the server to start
 echo "⏳ Waiting for server to start..."
-api_port=${api_port:-8020}  # Default to 8020 if not set
+api_port=8020  # Fixed API port
 
 for i in {1..30}; do
     if curl -s http://localhost:$api_port > /dev/null; then
@@ -116,30 +86,72 @@ for i in {1..30}; do
     echo -n "."
 done
 
+# Get public IP address if possible
+PUBLIC_IP=$(curl -s https://api.ipify.org 2>/dev/null || echo "YOUR_PUBLIC_IP")
+
 echo ""
 echo "🎉 PolarisLLM Deployment Server is ready!"
 echo "=============================================="
 echo ""
-echo "📋 Available commands:"
+echo "📋 Connection Information:"
+echo "  - API: http://localhost:$api_port"
+if [ "$PUBLIC_IP" != "YOUR_PUBLIC_IP" ]; then
+    echo "  - Public API: http://$PUBLIC_IP:$api_port (if firewall allows)"
+fi
+
 echo ""
-echo "📊 View server status:"
-echo "   docker-compose ps"
+echo "🔌 Port Binding Instructions:"
+echo "  Only the API port (8020) is bound by default. To expose other ports:"
 echo ""
-echo "📋 List available models:"
-echo "   docker-compose exec polarisllm polarisLLM list models"
+echo "  1. Stop the container:"
+echo "     docker-compose down"
 echo ""
-echo "🚀 Deploy a model:"
-echo "   docker-compose exec polarisllm polarisLLM deploy Qwen/Qwen2-VL-7B-Instruct"
+echo "  2. Edit docker-compose.yml to add port mappings under the 'ports:' section:"
+echo "     - \"9001:8001\"  # For model server port 8001"
+echo "     - \"2222:22\"    # For SSH access"
+echo "     - \"60000-61000:60000-61000/udp\"  # For Mosh (if needed)"
 echo ""
-echo "📋 List active deployments:"
-echo "   docker-compose exec polarisllm polarisLLM list deployments"
+echo "  3. Restart the container:"
+echo "     docker-compose up -d"
 echo ""
-echo "📜 View logs:"
-echo "   docker-compose logs -f"
+
+echo "🔐 SSH Access Instructions:"
+echo "  SSH server is running inside the container. To access it:"
 echo ""
-echo "🛑 Stop the server:"
-echo "   docker-compose down"
+echo "  1. Add your SSH public key to the container:"
+echo "     docker cp ~/.ssh/id_rsa.pub polarisllm-deployment-server:/root/.ssh/authorized_keys"
+echo "     docker exec polarisllm-deployment-server chmod 600 /root/.ssh/authorized_keys"
 echo ""
-echo "For more information, see the README.md file"
+echo "  2. Expose SSH port by updating docker-compose.yml and adding:"
+echo "     - \"2222:22\"    # Map host port 2222 to container port 22"
+echo ""
+echo "  3. After restarting, connect with:"
+echo "     ssh -p 2222 root@localhost"
+echo "     Or for public access: ssh -p 2222 root@YOUR_PUBLIC_IP"
+echo ""
+echo "  4. For Mosh, add UDP port range to docker-compose.yml:"
+echo "     - \"60000-61000:60000-61000/udp\"" 
+echo "     Then connect with: mosh --ssh=\"ssh -p 2222\" root@YOUR_IP"
+echo ""
+
+echo "📋 Available Commands:"
+echo "  • View server status:"
+echo "    docker-compose ps"
+echo ""
+echo "  • List available models:"
+echo "    docker-compose exec polarisllm polarisLLM list models"
+echo ""
+echo "  • Deploy a model:"
+echo "    docker-compose exec polarisllm polarisLLM deploy Qwen/Qwen2-VL-7B-Instruct"
+echo ""
+echo "  • List active deployments:"
+echo "    docker-compose exec polarisllm polarisLLM list deployments"
+echo ""
+echo "  • View logs:"
+echo "    docker-compose logs -f"
+echo ""
+echo "  • Stop the server:"
+echo "    docker-compose down"
+echo ""
 
 exit 0 
