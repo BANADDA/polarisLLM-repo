@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  polarisllm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polarisllm
+    ports:
+      - "8020:8020"  # API server
+      - "8001-8099:8001-8099"  # Range for model servers
+    volumes:
+      - ./cache:/root/.cache  # Cache model weights
+      - ./logs:/app/logs      # Logs directory
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
