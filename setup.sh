@@ -68,7 +68,7 @@ echo "🏗️ Building and starting PolarisLLM container..."
 export COMPOSE_HTTP_TIMEOUT=180  # Increase timeout to 3 minutes
 
 # Dynamic port selection - start with 8020 but try others if busy
-api_port=8020  # Initial port to try
+api_port=1099  # Initial port to try
 is_port_available() {
     ! (netstat -tuln | grep -q ":$1 ")
 }
