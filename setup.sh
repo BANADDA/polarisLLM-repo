@@ -110,46 +110,105 @@ echo "✅ Environment clean"
 echo "🏗️ Building and starting PolarisLLM container..."
 export COMPOSE_HTTP_TIMEOUT=180  # Increase timeout to 3 minutes
 
-# Dynamic port selection - start with 1009 but try others if busy
-api_port=1009  # Initial port to try
+# Helper function to check if a port is available
 is_port_available() {
     ! (netstat -tuln | grep -q ":$1 ")
 }
 
-# Check if default port is available, if not find a random available port
-if ! is_port_available $api_port; then
-    echo "⚠️ Port $api_port is already in use, looking for an alternative port..."
+# Function to find an available random port
+find_available_port() {
+    local attempts=30
+    local port
     
-    # Try a range of ports starting from 8021 up to 8080
-    for port in $(seq 8021 8080); do
-        if is_port_available $port; then
-            api_port=$port
-            echo "✅ Found available port: $api_port"
-            break
+    for ((i=1; i<=attempts; i++)); do
+        # Generate a random port between 10000 and 65000
+        port=$((RANDOM % 55000 + 10000))
+        
+        if is_port_available "$port"; then
+            echo "$port"
+            return 0
         fi
     done
     
-    # If no port in the sequence is available, try a completely random port between 10000-20000
-    if [ $api_port -eq 1009 ]; then
-        for attempt in {1..20}; do
-            random_port=$((RANDOM % 10000 + 10000))  # Random port between 10000-20000
-            if is_port_available $random_port; then
-                api_port=$random_port
-                echo "✅ Found available random port: $api_port"
-                break
+    echo "0"  # Return 0 if no port is found
+    return 1
+}
+
+# Find an available random port for the API
+echo "🔍 Finding an available random port for the API..."
+api_port=$(find_available_port)
+
+if [ "$api_port" -eq 0 ]; then
+    echo "❌ Could not find an available port after multiple attempts. Please free up some ports and try again."
+    exit 1
+fi
+
+echo "✅ Found available port: $api_port"
+
+# Update the docker-compose.yml file to use the random port
+echo "🔧 Updating docker-compose.yml to use port $api_port..."
+sed -i "s/1009:1009/$api_port:1009/g" docker-compose.yml
+
+# Replace any other hardcoded ports in the docker-compose.yml file
+# Find all port bindings in docker-compose.yml and replace them with random ports
+echo "🔄 Replacing all hardcoded ports with random ports in docker-compose.yml..."
+
+# Function to update a port binding in docker-compose.yml
+update_port_binding() {
+    local pattern=$1
+    local container_port=$2
+    
+    # Extract all port bindings matching the pattern
+    local bindings=$(grep -oE "$pattern" docker-compose.yml || echo "")
+    
+    if [ -n "$bindings" ]; then
+        for binding in $bindings; do
+            # Skip if it's the API port we already changed
+            if [[ "$binding" == *"$api_port:1009"* ]]; then
+                continue
             fi
+            
+            # Find an available random port
+            local random_port=$(find_available_port)
+            
+            if [ "$random_port" -eq 0 ]; then
+                echo "⚠️ Warning: Could not find an available port for $binding, skipping..."
+                continue
+            fi
+            
+            # Replace the port binding
+            echo "   Replacing $binding with $random_port:$container_port"
+            sed -i "s/$binding/$random_port:$container_port/g" docker-compose.yml
         done
     fi
-    
-    # If we still don't have an available port, exit with error
-    if ! is_port_available $api_port; then
-        echo "❌ Could not find an available port. Please free up some ports and try again."
-        exit 1
-    fi
-    
-    # Update the docker-compose.yml file to use the new port
-    echo "🔧 Updating docker-compose.yml to use port $api_port..."
-    sed -i "s/1009:1009/$api_port:1009/g" docker-compose.yml
+}
+
+# Extract all port mappings from docker-compose.yml
+port_mappings=$(grep -oE "[0-9]+:[0-9]+" docker-compose.yml || echo "")
+
+# Replace each port mapping with a random port
+if [ -n "$port_mappings" ]; then
+    for mapping in $port_mappings; do
+        # Skip if it's the API port we already changed
+        if [[ "$mapping" == "$api_port:1009" ]]; then
+            continue
+        fi
+        
+        # Extract container port (the part after the colon)
+        container_port=$(echo "$mapping" | cut -d':' -f2)
+        
+        # Find an available random port
+        random_port=$(find_available_port)
+        
+        if [ "$random_port" -eq 0 ]; then
+            echo "⚠️ Warning: Could not find an available port for $mapping, skipping..."
+            continue
+        fi
+        
+        # Replace the port binding
+        echo "   Replacing $mapping with $random_port:$container_port"
+        sed -i "s/$mapping/$random_port:$container_port/g" docker-compose.yml
+    done
 fi
 
 echo "🔌 Will use API port: $api_port"
