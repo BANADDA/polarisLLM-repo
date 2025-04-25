@@ -29,13 +29,56 @@ fi
 
 echo "✅ Docker is installed"
 
-# Check for Docker Compose
+# Check for Docker Compose and install if not present
+install_docker_compose() {
+    echo "🔄 Installing Docker Compose..."
+    
+    # Detect OS
+    OS="$(uname -s)"
+    ARCH="$(uname -m)"
+    
+    case "$OS" in
+        Linux)
+            echo "📋 Installing Docker Compose for Linux ($ARCH)..."
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$OS-$ARCH" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose 2>/dev/null || true
+            ;;
+        Darwin)
+            echo "📋 Installing Docker Compose for macOS..."
+            if command -v brew &> /dev/null; then
+                brew install docker-compose
+            else
+                echo "❌ Homebrew not found. Please install Docker Compose manually: https://docs.docker.com/compose/install/"
+                exit 1
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "📋 For Windows, please install Docker Desktop which includes Docker Compose."
+            echo "   Download from: https://docs.docker.com/desktop/install/windows-install/"
+            exit 1
+            ;;
+        *)
+            echo "❌ Unsupported operating system: $OS. Please install Docker Compose manually: https://docs.docker.com/compose/install/"
+            exit 1
+            ;;
+    esac
+    
+    echo "✅ Docker Compose installed successfully"
+}
+
 if ! command -v docker-compose &> /dev/null; then
-    echo "❌ Docker Compose is not installed. Please install Docker Compose first: https://docs.docker.com/compose/install/"
-    exit 1
+    echo "⚠️ Docker Compose is not installed."
+    install_docker_compose
+else
+    echo "✅ Docker Compose is installed"
 fi
 
-echo "✅ Docker Compose is installed"
+# Verify Docker Compose installation
+if ! command -v docker-compose &> /dev/null; then
+    echo "❌ Docker Compose installation failed. Please install Docker Compose manually: https://docs.docker.com/compose/install/"
+    exit 1
+fi
 
 # Check for NVIDIA Docker support
 if ! docker info | grep -i nvidia &> /dev/null; then
