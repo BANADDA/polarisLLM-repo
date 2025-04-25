@@ -183,31 +183,89 @@ update_port_binding() {
     fi
 }
 
-# Extract all port mappings from docker-compose.yml
-port_mappings=$(grep -oE "[0-9]+:[0-9]+" docker-compose.yml || echo "")
+# Extract port mappings from docker-compose.yml
+# Handle both single ports and port ranges
+echo "🔄 Replacing port mappings in docker-compose.yml with random ports..."
 
-# Replace each port mapping with a random port
-if [ -n "$port_mappings" ]; then
-    for mapping in $port_mappings; do
+# First, handle single port mappings (format: "host:container")
+single_ports=$(grep -oE "\"[0-9]+:[0-9]+\"" docker-compose.yml || echo "")
+if [ -n "$single_ports" ]; then
+    for mapping in $single_ports; do
+        # Remove quotes
+        clean_mapping=$(echo "$mapping" | tr -d '"')
+        
         # Skip if it's the API port we already changed
-        if [[ "$mapping" == "$api_port:1009" ]]; then
+        if [[ "$clean_mapping" == "$api_port:1009" ]]; then
             continue
         fi
         
         # Extract container port (the part after the colon)
-        container_port=$(echo "$mapping" | cut -d':' -f2)
+        container_port=$(echo "$clean_mapping" | cut -d':' -f2)
         
         # Find an available random port
         random_port=$(find_available_port)
         
         if [ "$random_port" -eq 0 ]; then
-            echo "⚠️ Warning: Could not find an available port for $mapping, skipping..."
+            echo "⚠️ Warning: Could not find an available port for $clean_mapping, skipping..."
             continue
         fi
         
         # Replace the port binding
-        echo "   Replacing $mapping with $random_port:$container_port"
-        sed -i "s/$mapping/$random_port:$container_port/g" docker-compose.yml
+        echo "   Replacing $clean_mapping with $random_port:$container_port"
+        # Need to escape for sed
+        escaped_mapping=$(echo "$mapping" | sed 's/[\/&]/\\&/g')
+        sed -i "s/$escaped_mapping/\"$random_port:$container_port\"/g" docker-compose.yml
+    done
+fi
+
+# Now handle port ranges (format: "startHost-endHost:startContainer-endContainer")
+port_ranges=$(grep -oE "\"[0-9]+-[0-9]+:[0-9]+-[0-9]+\"" docker-compose.yml || echo "")
+if [ -n "$port_ranges" ]; then
+    for range_mapping in $port_ranges; do
+        # Remove quotes
+        clean_range=$(echo "$range_mapping" | tr -d '"')
+        
+        # Extract host port range and container port range
+        host_range=$(echo "$clean_range" | cut -d':' -f1)
+        container_range=$(echo "$clean_range" | cut -d':' -f2)
+        
+        # Get start and end of container range
+        container_start=$(echo "$container_range" | cut -d'-' -f1)
+        container_end=$(echo "$container_range" | cut -d'-' -f2)
+        
+        # Calculate range size
+        range_size=$((container_end - container_start + 1))
+        
+        # Find an available random start port
+        start_port=$(find_available_port)
+        
+        if [ "$start_port" -eq 0 ]; then
+            echo "⚠️ Warning: Could not find an available port range for $clean_range, skipping..."
+            continue
+        fi
+        
+        # Calculate end port to maintain same range size
+        end_port=$((start_port + range_size - 1))
+        
+        # Check if the entire range is available
+        range_available=true
+        for ((p=start_port; p<=end_port; p++)); do
+            if ! is_port_available "$p"; then
+                range_available=false
+                break
+            fi
+        done
+        
+        if [ "$range_available" = false ]; then
+            echo "⚠️ Warning: Could not find an available port range of size $range_size, skipping..."
+            continue
+        fi
+        
+        # Replace the port range binding
+        echo "   Replacing $clean_range with $start_port-$end_port:$container_range"
+        # Need to escape for sed
+        escaped_range=$(echo "$range_mapping" | sed 's/[\/&]/\\&/g')
+        sed -i "s/$escaped_range/\"$start_port-$end_port:$container_range\"/g" docker-compose.yml
     done
 fi
 
