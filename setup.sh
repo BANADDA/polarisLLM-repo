@@ -66,11 +66,56 @@ echo "✅ Environment clean"
 # Build and start the container with increased timeout
 echo "🏗️ Building and starting PolarisLLM container..."
 export COMPOSE_HTTP_TIMEOUT=180  # Increase timeout to 3 minutes
+
+# Dynamic port selection - start with 8020 but try others if busy
+api_port=8020  # Initial port to try
+is_port_available() {
+    ! (netstat -tuln | grep -q ":$1 ")
+}
+
+# Check if default port is available, if not find a random available port
+if ! is_port_available $api_port; then
+    echo "⚠️ Port $api_port is already in use, looking for an alternative port..."
+    
+    # Try a range of ports starting from 8021 up to 8080
+    for port in $(seq 8021 8080); do
+        if is_port_available $port; then
+            api_port=$port
+            echo "✅ Found available port: $api_port"
+            break
+        fi
+    done
+    
+    # If no port in the sequence is available, try a completely random port between 10000-20000
+    if [ $api_port -eq 8020 ]; then
+        for attempt in {1..20}; do
+            random_port=$((RANDOM % 10000 + 10000))  # Random port between 10000-20000
+            if is_port_available $random_port; then
+                api_port=$random_port
+                echo "✅ Found available random port: $api_port"
+                break
+            fi
+        done
+    fi
+    
+    # If we still don't have an available port, exit with error
+    if ! is_port_available $api_port; then
+        echo "❌ Could not find an available port. Please free up some ports and try again."
+        exit 1
+    fi
+    
+    # Update the docker-compose.yml file to use the new port
+    echo "🔧 Updating docker-compose.yml to use port $api_port..."
+    sed -i "s/8020:8020/$api_port:8020/g" docker-compose.yml
+fi
+
+echo "🔌 Will use API port: $api_port"
+
+# Start the containers
 docker-compose up -d --build
 
 # Wait for the server to start
 echo "⏳ Waiting for server to start..."
-api_port=8020  # Fixed API port
 
 for i in {1..30}; do
     if curl -s http://localhost:$api_port > /dev/null; then
@@ -101,7 +146,7 @@ fi
 
 echo ""
 echo "🔌 Port Binding Instructions:"
-echo "  Only the API port (8020) is bound by default. To expose other ports:"
+echo "  The API port ($api_port) is bound. To expose other ports:"
 echo ""
 echo "  1. Stop the container:"
 echo "     docker-compose down"
@@ -154,4 +199,4 @@ echo "  • Stop the server:"
 echo "    docker-compose down"
 echo ""
 
-exit 0 
+exit 0
