@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: polarisllm
     ports:
-      - "8020:8020"  # API server
+      - "1009:1009"  # API server
       - "8001-8099:8001-8099"  # Range for model servers
     volumes:
       - ./cache:/root/.cache  # Cache model weights

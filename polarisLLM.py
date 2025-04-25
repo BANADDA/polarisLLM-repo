@@ -6,7 +6,7 @@ import requests
 import subprocess
 from tabulate import tabulate  # Add tabulate dependency
 
-API_URL = "http://localhost:8020"
+API_URL = "http://localhost:1009"
 
 def load_models_from_file():
     """Load models from the config file"""

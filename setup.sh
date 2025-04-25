@@ -67,8 +67,8 @@ echo "✅ Environment clean"
 echo "🏗️ Building and starting PolarisLLM container..."
 export COMPOSE_HTTP_TIMEOUT=180  # Increase timeout to 3 minutes
 
-# Dynamic port selection - start with 8020 but try others if busy
-api_port=1099  # Initial port to try
+# Dynamic port selection - start with 1009 but try others if busy
+api_port=1009  # Initial port to try
 is_port_available() {
     ! (netstat -tuln | grep -q ":$1 ")
 }
@@ -87,7 +87,7 @@ if ! is_port_available $api_port; then
     done
     
     # If no port in the sequence is available, try a completely random port between 10000-20000
-    if [ $api_port -eq 8020 ]; then
+    if [ $api_port -eq 1009 ]; then
         for attempt in {1..20}; do
             random_port=$((RANDOM % 10000 + 10000))  # Random port between 10000-20000
             if is_port_available $random_port; then
@@ -106,7 +106,7 @@ if ! is_port_available $api_port; then
     
     # Update the docker-compose.yml file to use the new port
     echo "🔧 Updating docker-compose.yml to use port $api_port..."
-    sed -i "s/8020:8020/$api_port:8020/g" docker-compose.yml
+    sed -i "s/1009:1009/$api_port:1009/g" docker-compose.yml
 fi
 
 echo "🔌 Will use API port: $api_port"

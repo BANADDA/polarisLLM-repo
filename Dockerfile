@@ -48,7 +48,7 @@ COPY ./start_server.sh /app/start_server.sh
 RUN chmod +x /app/start_server.sh
 
 # Expose the API port
-EXPOSE 8020
+EXPOSE 1009
 # Expose model server ports
 EXPOSE 8001-8099
 # Expose SSH and Mosh ports
