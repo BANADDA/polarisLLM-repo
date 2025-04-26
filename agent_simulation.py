@@ -6,7 +6,7 @@ import sys
 import re # For parsing steps
 
 def get_plan_from_planner(proxy_url, model_name, task):
-    """Calls the Planner model to break down the task into steps."""
+    """Calls the Planner model to break down the task into steps (streams the plan)."""
     print(f"--- Step 1: Planning --- ")
     print(f"Planner Model: {model_name}")
     print(f"Task         : {task}")
@@ -26,49 +26,63 @@ def get_plan_from_planner(proxy_url, model_name, task):
         ],
         "temperature": 0.3, # Lower temp for more structured planning
         "max_tokens": 400,
-        "stream": False # Need the full plan at once
+        "stream": True # CHANGED: Stream the plan generation
     }
     
+    full_plan_text = ""
+    print("\nPlanner Stream:")
     try:
-        response = requests.post(api_url, headers=headers, json=data)
+        response = requests.post(api_url, headers=headers, json=data, stream=True)
         response.raise_for_status()
-        response_json = response.json()
         
-        # Extract the plan text
-        if (response_json.get('choices') and 
-            len(response_json['choices']) > 0 and 
-            response_json['choices'][0].get('message') and 
-            response_json['choices'][0]['message'].get('content')):
-            
-            plan_text = response_json['choices'][0]['message']['content']
-            print(f"\nRaw Plan Received:\n{plan_text}")
-            
-            # --- Attempt to parse numbered steps --- 
-            # This regex looks for lines starting with number(s) and a dot.
-            steps = re.findall(r"^\s*\d+\.\s*(.*)", plan_text, re.MULTILINE)
-            
-            if not steps:
-                # Fallback: If no numbered list, split by newline and filter empties
-                print("[Warning] Could not parse numbered steps, attempting newline split.")
-                steps = [line.strip() for line in plan_text.split('\n') if line.strip()]
-            
-            if steps:
-                print(f"\nParsed Steps ({len(steps)}):\n" + "\n".join([f"  {i+1}. {s}" for i, s in enumerate(steps)]))
-                return steps
-            else:
-                 print("Error: Planner response contained no parseable steps.", file=sys.stderr)
-                 return None
-        else:
-            print("Error: Could not find plan in the planner response.", file=sys.stderr)
-            print(f"Response JSON: {response_json}", file=sys.stderr)
+        # --- Stream Handling for Plan ---
+        for line in response.iter_lines():
+            if line:
+                decoded_line = line.decode('utf-8')
+                if decoded_line.startswith('data: '):
+                    json_data_str = decoded_line[6:]
+                    if json_data_str.strip() == '[DONE]':
+                        break
+                    try:
+                        chunk = json.loads(json_data_str)
+                        if (chunk.get('choices') and 
+                            len(chunk['choices']) > 0 and 
+                            chunk['choices'][0].get('delta') and 
+                            chunk['choices'][0]['delta'].get('content')):
+                            content_chunk = chunk['choices'][0]['delta']['content']
+                            print(content_chunk, end='', flush=True) # Print chunk immediately
+                            full_plan_text += content_chunk # Accumulate full text
+                    except json.JSONDecodeError:
+                        print(f"\n[Error decoding JSON chunk: {json_data_str}]", file=sys.stderr)
+        print() # Newline after stream finishes
+        # --- End Stream Handling ---
+
+        # --- Now parse the *accumulated* full_plan_text ---
+        if not full_plan_text:
+            print("Error: Planner stream finished but no text was accumulated.", file=sys.stderr)
             return None
             
+        print(f"\n--- Parsing Accumulated Plan --- ")
+        # This regex looks for lines starting with number(s) and a dot.
+        steps = re.findall(r"^\s*\d+\.\s*(.*)", full_plan_text, re.MULTILINE)
+        
+        if not steps:
+            # Fallback: If no numbered list, split by newline and filter empties
+            print("[Warning] Could not parse numbered steps from accumulated text, attempting newline split.")
+            steps = [line.strip() for line in full_plan_text.split('\n') if line.strip()]
+        
+        if steps:
+            print(f"\nParsed Steps ({len(steps)}):\n" + "\n".join([f"  {i+1}. {s}" for i, s in enumerate(steps)]))
+            return steps
+        else:
+             print("Error: Accumulated planner response contained no parseable steps.", file=sys.stderr)
+             return None
+            
     except requests.exceptions.RequestException as e:
-        print(f"Error calling planner model: {e}", file=sys.stderr)
+        print(f"\nError calling planner model: {e}", file=sys.stderr)
         return None
-    except json.JSONDecodeError:
-        print("Error decoding JSON response from planner model.", file=sys.stderr)
-        print(f"Response Text: {response.text}", file=sys.stderr)
+    except Exception as e:
+        print(f"\nAn unexpected error occurred during planning: {e}", file=sys.stderr)
         return None
 
 def execute_step_by_executor(proxy_url, model_name, step_text, step_number, total_steps, original_task):
