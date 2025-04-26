@@ -156,7 +156,9 @@ if __name__ == "__main__":
         print(f"\n=== Beginning Execution of {len(steps)} Steps ===")
         total_steps = len(steps)
         for i, step in enumerate(steps):
+            print(f"\n>>> Requesting execution for Step {i+1}: '{step}'")
             success = execute_step_by_executor(args.url, args.executor_model, step, i + 1, total_steps, args.task)
+            print(f"<<< Finished receiving execution for Step {i+1}")
             if not success:
                 print(f"\nExecution failed at step {i+1}. Aborting.", file=sys.stderr)
                 break
