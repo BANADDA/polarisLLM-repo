@@ -1,0 +1,14 @@
+[Unit]
+Description=LLM Localtunnel Service
+After=qwen-model.service deepseek-model.service
+Requires=qwen-model.service deepseek-model.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/llm-deployment-server
+ExecStart=/home/ubuntu/llm-deployment-server/start_tunnels.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

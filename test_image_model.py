@@ -17,25 +17,25 @@ def test_multimodal_model(image_path="WhatsApp Image 2025-04-19 at 07.51.36_5ada
     print(f"Sending message: '{message}'")
     print("="*80)
     
-    url = "http://localhost:9089/v1/chat/completions"
+    url = "http://localhost:8989/v1/chat/completions"
     headers = {
         "Content-Type": "application/json"
     }
     
     # Check if the model is available
-    try:
-        response = requests.get("http://localhost:9089/v1/models")
-        if response.status_code == 200:
-            models = response.json()
-            print(f"Available models: {models}")
-        else:
-            print(f"Model API returned status code {response.status_code}. It might still be loading.")
-            print("Waiting 10 seconds before testing...")
-            time.sleep(10)
-    except Exception as e:
-        print(f"Error connecting to model API: {e}")
-        print("The model might still be loading. Waiting 10 seconds before testing...")
-        time.sleep(10)
+    # try:
+    #     response = requests.get("http://localhost:9089/v1/models")
+    #     if response.status_code == 200:
+    #         models = response.json()
+    #         print(f"Available models: {models}")
+    #     else:
+    #         print(f"Model API returned status code {response.status_code}. It might still be loading.")
+    #         print("Waiting 10 seconds before testing...")
+    #         time.sleep(10)
+    # except Exception as e:
+    #     print(f"Error connecting to model API: {e}")
+    #     print("The model might still be loading. Waiting 10 seconds before testing...")
+    #     time.sleep(10)
     
     # Prepare content based on whether we have an image
     if image_path and os.path.exists(image_path):

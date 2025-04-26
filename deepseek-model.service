@@ -1,0 +1,13 @@
+[Unit]
+Description=DeepSeek VL Model Service
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/llm-deployment-server
+ExecStart=/home/ubuntu/llm-deployment-server/llm_venv/bin/python /home/ubuntu/llm-deployment-server/llm_venv/bin/swift deploy --model deepseek-ai/deepseek-vl-7b-chat --infer_backend pt --port 9089 --host 0.0.0.0
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
