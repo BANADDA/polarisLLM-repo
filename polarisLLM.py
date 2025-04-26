@@ -177,18 +177,24 @@ def display_models_from_config(config):
             print(tabulate(table_data, headers=headers, tablefmt="pretty"))
             print()
 
-def deploy_model(model_id, gpu_id=0, max_model_len=None, port=None, isolate_env=True):
+def deploy_model(model_id, gpu_id=0, max_model_len=None, port=None, isolate_env=True, architecture_override=None, use_all_gpus=True, tensor_parallel_size=None, gpu_memory_utilization=0.9):
     """Deploy a model"""
     try:
         payload = {
             "model_id": model_id,
             "gpu_id": int(gpu_id),
-            "isolate_env": bool(isolate_env)
+            "isolate_env": bool(isolate_env),
+            "use_all_gpus": bool(use_all_gpus),
+            "gpu_memory_utilization": float(gpu_memory_utilization)
         }
         if max_model_len:
             payload["max_model_len"] = int(max_model_len)
         if port:
             payload["port"] = int(port)
+        if architecture_override:
+            payload["architecture_override"] = architecture_override
+        if tensor_parallel_size:
+            payload["tensor_parallel_size"] = int(tensor_parallel_size)
         
         response = requests.post(f"{API_URL}/deploy", json=payload)
         response.raise_for_status()
@@ -215,21 +221,23 @@ def list_deployments():
             print("No active deployments found.\n")
             return
         
-        print("+---------------------------+-----------+------+-----+----------+")
-        print("| Model ID                  | Status    | Port | GPU | Type     |")
-        print("+---------------------------+-----------+------+-----+----------+")
+        print("+---------------------------+-----------+------+--------+----------+")
+        print("| Model ID                  | Status    | Port | GPU    | Type     |")
+        print("+---------------------------+-----------+------+--------+----------+")
         
         for deployment in deployments:
             model_id = deployment.get("model_id", "Unknown")
             status = deployment.get("status", "Unknown")
             port = deployment.get("port", 0)
             gpu_id = deployment.get("gpu_id", 0)
+            use_all_gpus = deployment.get("use_all_gpus", False)
+            gpu_display = "All" if use_all_gpus else str(gpu_id)
             env_type = "Isolated" if deployment.get("env_path") else "System"
             
             status_display = f"● Running" if status == "running" else status
-            print(f"| {model_id:<25} | {status_display:<9} | {port:<4} | {gpu_id:<3} | {env_type:<8} |")
+            print(f"| {model_id:<25} | {status_display:<9} | {port:<4} | {gpu_display:<6} | {env_type:<8} |")
         
-        print("+---------------------------+-----------+------+-----+----------+")
+        print("+---------------------------+-----------+------+--------+----------+")
         
         print("\n=== Monitoring Options ===\n")
         print("• To view deployment logs:")
@@ -394,6 +402,10 @@ def show_help():
     print("      --max-len <length>                       - Maximum sequence length")
     print("      --port <port>                            - Port number")
     print("      --no-isolate                             - Don't use isolated environment")
+    print("      --architecture <arch>                    - Override model architecture class")
+    print("      --single-gpu                             - Use only the specified GPU instead of all GPUs")
+    print("      --tensor-parallel-size <size>            - Number of GPUs to use for tensor parallelism")
+    print("      --gpu-memory-utilization <value>         - GPU memory utilization (default: 0.9)")
     print("  polarisLLM list deployments                  - List active deployments")
     print("  polarisLLM logs <model_id>                   - View deployment logs")
     print("  polarisLLM test text <model_id>              - Test a text model interactively")
@@ -416,6 +428,10 @@ if __name__ == "__main__":
         max_model_len = None
         port = None
         isolate_env = True
+        architecture_override = None
+        use_all_gpus = True
+        tensor_parallel_size = None
+        gpu_memory_utilization = 0.9
         
         # Parse options
         i = 3
@@ -432,10 +448,22 @@ if __name__ == "__main__":
             elif sys.argv[i] == "--no-isolate":
                 isolate_env = False
                 i += 1
+            elif sys.argv[i] == "--architecture" and i+1 < len(sys.argv):
+                architecture_override = sys.argv[i+1]
+                i += 2
+            elif sys.argv[i] == "--single-gpu":
+                use_all_gpus = False
+                i += 1
+            elif sys.argv[i] == "--tensor-parallel-size" and i+1 < len(sys.argv):
+                tensor_parallel_size = int(sys.argv[i+1])
+                i += 2
+            elif sys.argv[i] == "--gpu-memory-utilization" and i+1 < len(sys.argv):
+                gpu_memory_utilization = float(sys.argv[i+1])
+                i += 2
             else:
                 i += 1
         
-        deploy_model(model_id, gpu_id, max_model_len, port, isolate_env)
+        deploy_model(model_id, gpu_id, max_model_len, port, isolate_env, architecture_override, use_all_gpus, tensor_parallel_size, gpu_memory_utilization)
     elif command == "list" and len(sys.argv) > 2 and sys.argv[2].lower() == "deployments":
         list_deployments()
     elif command == "logs" and len(sys.argv) > 2:

@@ -26,6 +26,9 @@ class DeployRequest(BaseModel):
     gpu_memory_utilization: float = 0.9
     port: Optional[int] = None  # Make port optional
     isolate_env: bool = True    # New parameter to request isolated environment
+    use_all_gpus: bool = True   # New parameter to use all available GPUs (default: True)
+    architecture_override: Optional[str] = None  # New parameter to override model architecture
+    tensor_parallel_size: Optional[int] = None   # New parameter for tensor parallelism
 
 class DeploymentStatus(BaseModel):
     status: str
@@ -35,6 +38,9 @@ class DeploymentStatus(BaseModel):
     port: int
     gpu_id: int
     env_path: Optional[str] = None
+    use_all_gpus: bool = False
+    architecture_override: Optional[str] = None  # Field for architecture override
+    tensor_parallel_size: Optional[int] = None   # Field for tensor parallelism
 
 # Track deployments
 active_deployments = {}
@@ -278,7 +284,9 @@ def create_virtual_environment(model_id: str, requires: str) -> str:
 
 def deploy_model_task(model_id: str, gpu_id: int, max_model_len: Optional[int], 
                      vision_batch_size: Optional[int], gpu_memory_utilization: float,
-                     port: int, isolate_env: bool) -> None:
+                     port: int, isolate_env: bool, use_all_gpus: bool = False,
+                     architecture_override: Optional[str] = None,
+                     tensor_parallel_size: Optional[int] = None) -> None:
     """Background task to deploy the model"""
     # Create log file first so it exists even if there's an early failure
     log_file = f"deployment_{model_id.replace('/', '_')}_{port}.log"
@@ -293,14 +301,22 @@ def deploy_model_task(model_id: str, gpu_id: int, max_model_len: Optional[int],
         "port": port,
         "gpu_id": gpu_id,
         "env_path": None,
-        "status": "deploying"
+        "status": "deploying",
+        "use_all_gpus": use_all_gpus,
+        "architecture_override": architecture_override,
+        "tensor_parallel_size": tensor_parallel_size
     }
     
     try:
         with open(log_file, "w") as f:
             f.write(f"Starting deployment for {model_id} on port {port}\n")
             f.write(f"Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"GPU ID: {gpu_id}\n")
+            if use_all_gpus:
+                f.write(f"Using all available GPUs\n")
+                if tensor_parallel_size:
+                    f.write(f"Tensor parallel size: {tensor_parallel_size}\n")
+            else:
+                f.write(f"GPU ID: {gpu_id}\n")
             f.write(f"Isolated environment: {isolate_env}\n\n")
         
         # Find model configuration
@@ -371,7 +387,35 @@ def deploy_model_task(model_id: str, gpu_id: int, max_model_len: Optional[int],
         
         # Build command - use swift deploy directly
         # Add VLLM_USE_V1=0 for multimodal models to fix compatibility issues
-        env_vars = [f"CUDA_VISIBLE_DEVICES={gpu_id}"]
+        if use_all_gpus:
+            if tensor_parallel_size:
+                # Use specific tensor parallel size
+                with open(log_file, "a") as f:
+                    f.write(f"Setting tensor parallel size to {tensor_parallel_size}\n")
+                env_vars = []  # Don't set CUDA_VISIBLE_DEVICES to use specified tensor parallel size
+            else:
+                # Try to detect number of GPUs for tensor parallelism
+                try:
+                    import subprocess
+                    gpu_count_result = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'], 
+                                                       capture_output=True, text=True)
+                    available_gpus = len(gpu_count_result.stdout.strip().split('\n'))
+                    tensor_parallel_size = available_gpus
+                    with open(log_file, "a") as f:
+                        f.write(f"Auto-detected {available_gpus} GPUs for tensor parallelism\n")
+                    env_vars = []
+                except Exception as e:
+                    with open(log_file, "a") as f:
+                        f.write(f"Error detecting GPU count: {str(e)}\n")
+                        f.write(f"Using default CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7\n")
+                    env_vars = ["CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7"]
+        else:
+            env_vars = [f"CUDA_VISIBLE_DEVICES={gpu_id}"]
+            
+        # Add PyTorch CUDA allocation configuration for large models
+        if tensor_parallel_size and tensor_parallel_size > 1:
+            env_vars.append("PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True")
+            
         if model_config["is_multimodal"]:
             env_vars.append("VLLM_USE_V1=0")
             
@@ -385,6 +429,18 @@ def deploy_model_task(model_id: str, gpu_id: int, max_model_len: Optional[int],
             "--port", str(port),
             "--host", "0.0.0.0"  # Ensure accessible from outside container
         ]
+        
+        # Add tensor parallelism if specified
+        if tensor_parallel_size and tensor_parallel_size > 1:
+            cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
+            with open(log_file, "a") as f:
+                f.write(f"Using tensor parallel size: {tensor_parallel_size}\n")
+        
+        # Add architecture_override if provided
+        if architecture_override:
+            cmd.extend(["--hf-overrides", f'{{"architectures": ["{architecture_override}"]}}'])
+            with open(log_file, "a") as f:
+                f.write(f"Using architecture override: {architecture_override}\n")
         
         # Add vision_batch_size for multimodal models
         if model_config["is_multimodal"]:
@@ -479,7 +535,10 @@ async def deploy_model(deploy_request: DeployRequest, background_tasks: Backgrou
                 log_file=active_deployments[model_id]["log_file"],
                 port=active_deployments[model_id]["port"],
                 gpu_id=active_deployments[model_id]["gpu_id"],
-                env_path=active_deployments[model_id].get("env_path")
+                env_path=active_deployments[model_id].get("env_path"),
+                use_all_gpus=active_deployments[model_id].get("use_all_gpus", False),
+                architecture_override=active_deployments[model_id].get("architecture_override"),
+                tensor_parallel_size=active_deployments[model_id].get("tensor_parallel_size")
             )
         
         # Find model in config
@@ -504,11 +563,24 @@ async def deploy_model(deploy_request: DeployRequest, background_tasks: Backgrou
             vision_batch_size=deploy_request.vision_batch_size,
             gpu_memory_utilization=deploy_request.gpu_memory_utilization,
             port=port,
-            isolate_env=deploy_request.isolate_env
+            isolate_env=deploy_request.isolate_env,
+            use_all_gpus=deploy_request.use_all_gpus,
+            architecture_override=deploy_request.architecture_override,
+            tensor_parallel_size=deploy_request.tensor_parallel_size
         )
         
         # Build the command for display
-        env_vars = [f"CUDA_VISIBLE_DEVICES={deploy_request.gpu_id}"]
+        if deploy_request.use_all_gpus:
+            if deploy_request.tensor_parallel_size:
+                env_vars = []  # Don't set CUDA_VISIBLE_DEVICES 
+            else:
+                env_vars = ["CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7"]  # Default to 8 GPUs
+        else:
+            env_vars = [f"CUDA_VISIBLE_DEVICES={deploy_request.gpu_id}"]
+        
+        # Add PyTorch CUDA allocation configuration for large models
+        if deploy_request.tensor_parallel_size and deploy_request.tensor_parallel_size > 1:
+            env_vars.append("PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True")
         
         # Add VLLM_USE_V1=0 for multimodal models
         if model_config["is_multimodal"]:
@@ -524,6 +596,14 @@ async def deploy_model(deploy_request: DeployRequest, background_tasks: Backgrou
             "--port", str(port),
             "--host", "0.0.0.0"  # Ensure the model server accepts connections from all interfaces
         ]
+        
+        # Add tensor parallelism if specified
+        if deploy_request.tensor_parallel_size and deploy_request.tensor_parallel_size > 1:
+            cmd_parts.extend(["--tensor-parallel-size", str(deploy_request.tensor_parallel_size)])
+        
+        # Add architecture_override if provided
+        if deploy_request.architecture_override:
+            cmd_parts.extend(["--hf-overrides", f'{{"architectures": ["{deploy_request.architecture_override}"]}}'])
         
         if model_config["is_multimodal"]:
             cmd_parts.extend(["--vision_batch_size", str(deploy_request.vision_batch_size or 2)])
@@ -542,7 +622,10 @@ async def deploy_model(deploy_request: DeployRequest, background_tasks: Backgrou
             deployment_command=command,
             log_file=log_file,
             port=port,
-            gpu_id=deploy_request.gpu_id
+            gpu_id=deploy_request.gpu_id,
+            use_all_gpus=deploy_request.use_all_gpus,
+            architecture_override=deploy_request.architecture_override,
+            tensor_parallel_size=deploy_request.tensor_parallel_size
         )
         
     except ValueError as e:
@@ -570,7 +653,10 @@ async def get_deployments():
             "log_file": deployment["log_file"],
             "port": deployment["port"],
             "gpu_id": deployment["gpu_id"],
-            "env_path": deployment.get("env_path")
+            "env_path": deployment.get("env_path"),
+            "use_all_gpus": deployment.get("use_all_gpus", False),
+            "architecture_override": deployment.get("architecture_override"),
+            "tensor_parallel_size": deployment.get("tensor_parallel_size")
         })
     
     return result

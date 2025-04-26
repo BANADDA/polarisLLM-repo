@@ -1,14 +1,19 @@
 version: '3.8'
 
 services:
-  polarisllm:
+  polarisstudio:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: polarisllm
+    image: polarisstudio
+    container_name: polarisstudio
     ports:
       - "1009:1009"  # API server
-      - "8001-8099:8001-8099"  # Range for model servers
+      - "8001:8001"  # Model server ports (individual mapping)
+      - "8002:8002"
+      - "8003:8003"
+      - "8004:8004"
+      - "8005:8005"
     volumes:
       - ./cache:/root/.cache  # Cache model weights
       - ./logs:/app/logs      # Logs directory

@@ -33,8 +33,9 @@ RUN pip install "ms-swift[all]" -U
 # Copy the application code
 COPY . /app/
 
-# Install additional Python dependencies
-RUN pip install fastapi uvicorn requests tabulate
+# Install dependencies from requirements.txt
+COPY requirements.txt /app/
+RUN pip install -r requirements.txt
 
 # Install required apps
 RUN mkdir -p /app/envs
@@ -58,7 +59,7 @@ EXPOSE 22 60000-61000/udp
 CMD ["/app/start_server.sh"]
 
 # Label the image
-LABEL maintainer="PolarisLLM Team" \
+LABEL maintainer="PolarisStudio Team" \
       description="PolarisLLM Model Deployment Server - Deploy and serve large language models with ease" \
       version="1.0"
 
