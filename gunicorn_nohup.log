@@ -1,0 +1,18 @@
+nohup: ignoring input
+[2025-04-27 06:03:47 +0000] [2123533] [INFO] Starting gunicorn 23.0.0
+[2025-04-27 06:03:47 +0000] [2123533] [INFO] Listening at: http://0.0.0.0:8989 (2123533)
+[2025-04-27 06:03:47 +0000] [2123533] [INFO] Using worker: sync
+[2025-04-27 06:03:47 +0000] [2123534] [INFO] Booting worker with pid: 2123534
+[2025-04-27 06:03:47 +0000] [2123535] [INFO] Booting worker with pid: 2123535
+[2025-04-27 06:03:48 +0000] [2123536] [INFO] Booting worker with pid: 2123536
+[2025-04-27 06:03:48 +0000] [2123537] [INFO] Booting worker with pid: 2123537
+[2025-04-27 06:03:56 +0000] [2123533] [INFO] Handling signal: hup
+[2025-04-27 06:03:56 +0000] [2123533] [INFO] Hang up: Master
+[2025-04-27 06:03:56 +0000] [2123533] [ERROR] Worker (pid:2123534) was sent SIGHUP!
+[2025-04-27 06:03:56 +0000] [2123533] [ERROR] Worker (pid:2123536) was sent SIGHUP!
+[2025-04-27 06:03:56 +0000] [2123533] [ERROR] Worker (pid:2123535) was sent SIGHUP!
+[2025-04-27 06:03:56 +0000] [2123533] [ERROR] Worker (pid:2123537) was sent SIGHUP!
+[2025-04-27 06:03:56 +0000] [2123610] [INFO] Booting worker with pid: 2123610
+[2025-04-27 06:03:56 +0000] [2123611] [INFO] Booting worker with pid: 2123611
+[2025-04-27 06:03:56 +0000] [2123612] [INFO] Booting worker with pid: 2123612
+[2025-04-27 06:03:56 +0000] [2123613] [INFO] Booting worker with pid: 2123613
